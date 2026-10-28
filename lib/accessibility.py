@@ -43,6 +43,8 @@ def locate(data, capture=False):
                 continue
             if capture:
                 states = node.get_state_set()
+                if states.contains(Atspi.StateType.FOCUSED) and node.get_role() == Atspi.Role.PASSWORD_TEXT:
+                    raise ValueError('Protected text fields do not support automatic insertion')
                 if states.contains(Atspi.StateType.FOCUSED) and states.contains(Atspi.StateType.EDITABLE) and node.get_role() != Atspi.Role.PASSWORD_TEXT and node.get_editable_text_iface() and node.get_text_iface():
                     return node
             elif str(node.path) == data['path']:
@@ -60,7 +62,7 @@ def text_of(node):
 
 
 def main():
-    Atspi.set_timeout(600, 1200)
+    Atspi.set_timeout(1500, 3000)
     command = sys.argv[1]
     data = json.load(sys.stdin)
     node = locate(data, capture=command in ('capture', 'probe'))
@@ -72,11 +74,24 @@ def main():
     if command == 'capture':
         if any(marker in before for marker in MARKERS):
             raise ValueError('An existing dictation marker makes this field ambiguous')
-        if text.get_n_selections():
-            raise ValueError('Selected text is not replaced automatically; clear selection first')
+        if text.get_n_selections() > 1:
+            raise ValueError('Multiple selected ranges are ambiguous')
         offset = text.get_caret_offset()
         marker = data['marker']
+        removed = ''
+        if text.get_n_selections() == 1:
+            selected = Atspi.Text.get_selection(text,0)
+            start, end = selected.start_offset, selected.end_offset
+            if 0 <= start < end <= len(before):
+                offset = start
+                removed = before[start:end]
+                if not edit.delete_text(start,end):
+                    raise ValueError('Application rejected selected text replacement')
+        if not 0 <= offset <= len(before):
+            raise ValueError('Application did not expose a valid caret')
         if not edit.insert_text(offset, marker, len(marker.encode())):
+            if removed:
+                edit.insert_text(offset,removed,len(removed.encode()))
             raise ValueError('Application rejected marker insertion')
         if Atspi.Text.get_text(text, offset, offset+len(marker)) != marker:
             raise ValueError('Marker insertion could not be verified')

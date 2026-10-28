@@ -78,3 +78,30 @@ The installer now offers a five-step terminal wizard, a final plan confirmation,
 - Shell syntax, Python compilation and whitespace checks passed.
 
 Dependency installation is previewed and tested through mocks; these checks did not install operating-system packages. Packages are not automatically uninstalled on later failure. Config and credentials use atomic file replacement with private backups; the installer does not claim a transaction spanning package installation, systemd and desktop settings. Backups support manual recovery after an interrupted apply. Automatic rollback, resumable setup, a GUI and native macOS/Windows installers are not implemented.
+
+## General text fields and retained-recording recovery — 2026-10-28
+
+This update retains AT-SPI saved-position delivery and adds a generic, guarded foreground path. It is not a Mousepad whitelist. GTK selected text is now handled at capture, including an address bar selected with Ctrl+L. A cleanly unavailable AT-SPI target can use foreground delivery; an ambiguous/partially changed anchor cannot.
+
+Verified locally:
+
+- **67 offline unit tests passed**, covering foreground guards, GUI ASCII/Unicode/multiline paste, terminal ASCII typing, refusal after changed input/focus, transport classification/redaction, and explicit recovery without duplicate provider submissions after a transcript is saved.
+- **Real X11 RECORD guard test passed** (`python3 tests/integration_guard.py`): Alt+X itself did not dirty the guard, pointer movement alone was allowed, normal typing invalidated it, and the state file retained only flags/focus/reason, not key contents.
+- **Real field integration suite passed** (`STT_TEST_FIREFOX=1 /usr/bin/python3 tests/integration_fields.py`) using isolated Xvfb display and disposable application profiles:
+  - Thunar selected path entry: AT-SPI replacement.
+  - Chrome address bar: guarded clipboard paste.
+  - Chrome web input: English/Arabic text preserved through clipboard insertion.
+  - Chrome multiline textarea: both lines arrived in the field.
+  - Later user edits were preserved and blocked fallback insertion.
+  - Focus switching away and back invalidated the guard.
+  - The real recorder/stop/detached-worker path delivered into Chrome through a silent PulseAudio sink and a stubbed provider response.
+  - XFCE terminal input received ASCII text through normal key input without a paste chord.
+  - Firefox address bar and Firefox web input received the expected text in a fresh profile. Snap startup required the normal user session bus; no sandbox was disabled.
+- The separate **live Groq synthetic-speech test passed** through WAV-to-FLAC multipart upload using the configured model/key. The result was `This is the Speech-to-Text-Anywhere compatibility test.` GUI checks above did not make provider calls.
+- The user's retained 101.1-second recording was recovered into a private 936-character transcript. One explicit provider submission completed; when a clipboard-side problem occurred, the saved transcript was reused for copying without another provider request. The original WAV remains retained. No original window/document was modified during recovery.
+- The old network failure's exact cause is unknown because the prior implementation suppressed its underlying reason. New errors classify DNS/TLS/refusal/reset/timeout/HTTP/response failures and preserve outcome-unknown metadata without leaking request data or credentials. There are no automatic provider retries. The default request timeout is now 180 seconds; lossless FLAC reduced the retained recording from 3,235,278 to 2,077,648 bytes in a local conversion check.
+- Home-folder enumeration still succeeded after GUI tests; isolated sessions retain `GVFS_DISABLE_FUSE=1`.
+
+The generic foreground guard checks X11 input and focus, not arbitrary application-private document state. It does not create a saved cursor anchor in opaque browser widgets or terminal TUIs. Such targets require unchanged input/focus for automatic foreground insertion; normal focus transitions invalidate the guard even if focus later returns. Terminal multiline text stays on the clipboard for explicit paste. Actual 1Password controls and live Codex/Claude sessions were not exercised; no universal background-insertion guarantee is made.
+
+The [field regression screenshot](../assets/screenshots/field-regression.png) shows only disposable test content. It is evidence of real widgets and a stubbed provider pipeline, not a screenshot of a live user transcription.

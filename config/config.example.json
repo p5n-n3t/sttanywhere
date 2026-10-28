@@ -4,7 +4,7 @@
   "audio_source": "default",
   "max_recording_seconds": 600,
   "max_audio_bytes": 25000000,
-  "request_timeout": 90,
+  "request_timeout": 180,
   "job_timeout": 300,
   "terminal_pattern": "warp|terminal|kitty|xterm|alacritty|wezterm|konsole|tilix|urxvt|st$",
   "paste_mode": "auto",
@@ -69,5 +69,7 @@
       },
       "chord": "ctrl+v"
     }
-  ]
+  ],
+  "foreground_fallback": true,
+  "lossless_upload": true
 }

@@ -8,7 +8,7 @@
 
 STT Anywhere uses a small Bash launcher and Python client. Audio capture and clipboard/X11 integration use Linux desktop utilities; anchored insertion uses the system Python with PyGObject and AT-SPI. Transcription is sent to a provider you configure. The project does not bundle a speech model or make provider calls until you record or transcribe a file.
 
-[Quick start](#install) · [Provider configuration](config/config.example.json) · [Tested behavior](docs/VERIFICATION.md) · [Alternatives](docs/ALTERNATIVES.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
+[Quick start](#install) · [Provider configuration](config/config.example.json) · [Compatibility](docs/COMPATIBILITY.md) · [Tested behavior](docs/VERIFICATION.md) · [Alternatives](docs/ALTERNATIVES.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
 ## Platform support
 
@@ -16,8 +16,10 @@ STT Anywhere uses a small Bash launcher and Python client. Audio capture and cli
 | --- | --- |
 | Xubuntu / XFCE / X11 | Implemented; local microphone, shortcut and insertion checks recorded in verification |
 | Other Linux X11 desktops | Desktop integration needs verification; supplied shortcut installer is XFCE-specific |
-| Background insertion in Mousepad | Tested with a moved caret and another window in front |
-| Arbitrary browser tabs and terminal prompts | Not guaranteed; unsupported targets use clipboard recovery |
+| AT-SPI insertion in Mousepad and the selected Thunar path field | Tested with a moved caret/background window and selected-range replacement |
+| Guarded foreground fallback in Chrome GUI fields and an XFCE terminal prompt | Tested in isolated Xvfb; GUI fields use clipboard paste, terminal ASCII uses native typing |
+| Firefox address bar and web input | Guarded clipboard paste checked in a fresh profile; no provider requests in the field test |
+| Arbitrary browser tabs, rich editors and terminal prompts | Not guaranteed; unsupported or unsafe cases stay on the clipboard |
 | Linux Wayland | No supported desktop backend yet |
 | macOS and Windows | Planned assessment only; no native builds or installers yet |
 
@@ -28,10 +30,12 @@ STT Anywhere is open source under the MIT license. Provider API usage may have s
 - Records from the default microphone and transcribes on toggle, or transcribes an existing audio file.
 - Supports Groq (the example default) and OpenAI-compatible multipart transcription, AssemblyAI's asynchronous upload/transcription flow, and Cloudflare's base64 JSON transcription endpoint through provider profiles. A custom OpenAI-compatible profile is also included as a template.
 - Captures the focused editable AT-SPI text object and inserts a unique marker there. At completion it replaces that exact marker in the same object, even if the caret moved meanwhile.
-- Provides clipboard-only fallback, status, cancellation, diagnostics, foreground context, and an explicit paste command.
+- Provides guarded foreground delivery when an accessible field is unavailable, plus clipboard recovery, status, cancellation, diagnostics, foreground context, and an explicit paste command.
 - Offers an installer for the **Alt+X** Xfce keyboard shortcut and migration from an existing xhisper setup.
 
-Anchored insertion uses AT-SPI editable-text APIs; it does not activate a window or send typing keys at transcription completion. It records the target process ID and start token, accessible object path, and marker, then replaces the marker only if that exact marker remains unique in the original editable object. If the field is unsupported, the anchor is ambiguous or removed, or the app process changes, STT Anywhere leaves the destination untouched and keeps the transcript on the clipboard and in the private recovery file; it does not type the transcript into another target. If an anchor was captured but cannot be replaced, or automatic replacement is disabled, the marker may remain in the field and should be replaced manually. Browser tabs and rich editors are supported only when they expose the focused editable object through AT-SPI; STT Anywhere does not enumerate tabs or infer which one the user intends. Anchored mode is not universal terminal support. For editor workflows that need keyboard paste, see `delivery_mode: "legacy"` and the explicit `paste` command below.
+Anchored insertion uses AT-SPI editable-text APIs; it does not activate a window or send typing keys at transcription completion. It records the target process ID and start token, accessible object path, and marker, then replaces the marker only if that exact marker remains unique in the original editable object. A single selected range, such as the address bar text selected by Ctrl+L, is replaced when the marker is captured; multiple selected ranges are ambiguous. If the focused field has no accessible editable object, the default guarded foreground fallback may deliver text only while the original window and X input focus remain unchanged and no user input event was detected. For terminal-class windows, single-line ASCII uses native `xdotool type` with a 5 ms delay, avoiding terminal paste-chord behavior. For GUI windows, ASCII and Unicode are copied to the clipboard and pasted using the configured app rule after another focus/input check. GUI fields can paste multiline text atomically; terminal multiline text stays on the clipboard for explicit paste. If input or focus changed, the monitor is unavailable, or the result cannot be safely delivered, the transcript stays in the clipboard and private recovery file. Unsupported fields receive no recording placeholder.
+
+The foreground input monitor starts before AT-SPI target capture and stores only monitor readiness, a dirty/clean flag, the initial focus ID and a reason; it never records key contents. It ignores shortcut modifiers and the start/stop key. Other keyboard input, mouse clicks, and normal focus changes mark the session dirty, even if focus later returns. Pointer motion by itself is not treated as an edit. At delivery, the fallback also checks the original active window and X input focus. It never activates or refocuses another window. Browser tabs and rich editors still depend on their exposed AT-SPI editable object or an unchanged foreground field; STT Anywhere does not enumerate tabs or infer which one the user intends. Neither path establishes universal support for browser editors or terminals. For the older focus-and-paste behavior, set `delivery_mode: "legacy"` explicitly.
 
 ## Requirements
 
@@ -99,11 +103,14 @@ sttanywhere doctor             # inspect local dependencies and configuration
 sttanywhere context            # describe the currently focused application and paste chord
 sttanywhere paste              # paste clipboard into the currently focused application
 sttanywhere transcribe clip.wav # transcribe an existing audio file
+sttanywhere retry JOB          # explicitly recover one failed job to the clipboard
 ```
 
-The toggle records from the PulseAudio/PipeWire default input and submits the audio once to the selected provider. A successful result is copied to the clipboard. With the default `delivery_mode: "anchored"`, the result replaces the unique recording marker in the original AT-SPI editable object. If an anchor cannot be safely captured or verified, the status is `clipboard`; the transcript stays on the clipboard and in the recovery file, with no typing sent to another target. `auto_paste: false` disables automatic replacement; if a marker was inserted, replace it manually and paste the clipboard text. Completion notifications are off by default (`notify_completion: false`).
+The toggle records from the PulseAudio/PipeWire default input and submits the audio once to the selected provider. A successful result is copied to the clipboard. With the default `delivery_mode: "anchored"`, the result replaces the unique recording marker in the original AT-SPI editable object. If that field is unavailable, a guarded foreground fallback may deliver text when focus and input remained unchanged; otherwise the transcript stays on the clipboard and in the recovery file. `foreground_fallback: false` disables that fallback. `auto_paste: false` disables automatic delivery; if a marker was inserted, replace it manually and paste the clipboard text. Recording notices default to on when no accessible anchor was captured (`notify_recording: true`); completion notices default to off (`notify_completion: false`).
 
-`sttanywhere context` prints JSON with `window_class`, `window_name`, `window_pid`, `foreground_process`, and the selected `paste_chord` (as well as the X11 window ID). It uses `xdotool` for the active window ID/name and `xprop` for `WM_CLASS`, since Ubuntu's `xdotool` does not provide a `getwindowclassname` command. Foreground process detection only reports a terminal descendant when exactly one TTY candidate is unambiguous; multiple tabs or sessions produce an unknown value instead of a guess. The `paste` command sends the configured chord to the field that is focused when you invoke it; it does not refocus the window captured at recording start.
+`sttanywhere context` prints JSON with `window_class`, `window_name`, `window_pid`, `foreground_process`, the selected `paste_chord`, and an AT-SPI `background_insertion` probe (as well as the X11 window ID). It uses `xdotool` for the active window ID/name and `xprop` for `WM_CLASS`, since Ubuntu's `xdotool` does not provide a `getwindowclassname` command. Foreground process detection only reports a terminal descendant when exactly one TTY candidate is unambiguous; multiple tabs or sessions produce an unknown value instead of a guess. The `paste` command sends the configured chord to the field that is focused when you invoke it; it does not refocus the window captured at recording start.
+
+`retry JOB` is one explicit recovery attempt for a failed job directory shown by `sttanywhere status`. It never returns to the old document or caret: recovery copies the transcript to the clipboard and retains the audio. If a transcript was already saved, it reuses it without another provider request. Otherwise it submits the retained audio once. There are no automatic provider retries. For timeouts, connection resets, or some connection failures the provider outcome may be unknown; review the recorded error before retrying because the provider may have processed and billed the request even if the client did not receive the response.
 
 `transcribe FILE` submits the named file through the selected provider profile without inserting it into an application. Provider requests require network access and may consume provider quota or incur charges under that provider's terms. Requests are not automatically retried.
 
@@ -129,15 +136,18 @@ The legacy keyboard mode uses one trailing space on each placeholder so its fixe
 | `audio_source` | `default` | PulseAudio/PipeWire source name passed to `ffmpeg`. |
 | `max_recording_seconds` | `600` | Maximum capture duration per microphone recording. |
 | `max_audio_bytes` | `25000000` | Upper bound on the audio file submitted. |
-| `request_timeout` | `90` | Timeout in seconds for an individual HTTP request. |
+| `request_timeout` | `180` | Example timeout in seconds for an individual HTTP request. |
 | `job_timeout` | `300` | AssemblyAI asynchronous job deadline. |
 | `delivery_mode` | `anchored` | `anchored` replaces the original AT-SPI marker in place. `legacy` opts into the older focus-and-keyboard insertion flow. |
 | `auto_paste` | `true` | In anchored mode, automatically replace the marker in the captured editable object. In legacy mode, control the older keyboard paste behavior. |
 | `notify_completion` | `false` | Show a desktop notification when a transcription finishes. |
+| `notify_recording` | `true` | Show a short start notice when an AT-SPI anchor was not captured. |
+| `foreground_fallback` | `true` | Permit guarded same-focus delivery when AT-SPI capture is cleanly unavailable. |
+| `lossless_upload` | `true` | Convert WAV input to temporary FLAC for the OpenAI-compatible multipart adapter. |
 | `paste_rules` | app-specific | Ordered matches for context fields such as `foreground_process`, `window_name`, and `window_class`; the first match selects a chord. |
 | `paste_mode` | `auto` | Fallback chord: terminal paste for a `window_class` matching `terminal_pattern`, otherwise regular paste. `terminal` always uses the terminal chord. |
 
-The example config has two paste rules for Codex/Claude contexts: first `foreground_process`, then `window_name`, each mapped to `ctrl+v`. If neither matches, the default terminal fallback uses `ctrl+shift+v`; other windows use `ctrl+v`. Rules choose a chord for the explicit `sttanywhere paste` command; anchored delivery edits the accessible text object directly and does not use paste chords.
+The example config has two paste rules for Codex/Claude contexts: first `foreground_process`, then `window_name`, each mapped to `ctrl+v`. If neither matches, the default terminal fallback uses `ctrl+shift+v`; other windows use `ctrl+v`. Rules choose a chord for the explicit `sttanywhere paste` command and for GUI foreground clipboard-paste delivery. Terminal ASCII foreground delivery types characters directly and bypasses paste chords; anchored delivery edits the accessible text object directly and does not use paste chords.
 
 For example, add or adjust per-app rules like this:
 
@@ -189,6 +199,8 @@ python3 tests/integration_x11.py
 ```
 
 `/usr/bin/python3 tests/integration_background.py` exercises the anchored path against a real Mousepad editor in an isolated Xvfb session, with a mocked transcription response and no provider request. It checks replacement in the original accessible object after the caret moves, preservation of other edits, no focus stealing, and clipboard fallback when the marker is gone. `tests/integration_x11.py` and `tests/integration_terminal.py` cover the legacy keyboard flow; the terminal check uses a stub transcription and makes no network request. These checks do not establish universal browser or terminal support.
+
+`/usr/bin/python3 tests/integration_fields.py` checks specific real fields in isolated Xvfb apps: the selected Thunar path field, Chrome's address bar and Unicode web input, a changed-field clipboard fallback, and a read-only XFCE terminal prompt. Its Chrome toggle/stop case exercises recording and detached delivery with a stub transcript; the other field cases exercise delivery helpers directly. The script makes no provider request. The optional Firefox check passed for both its address bar and a web input. Chrome multiline textarea and focus-away-and-return checks also passed. These checks do not substitute for a live microphone-to-provider run. See [compatibility details](docs/COMPATIBILITY.md) for scope and limits.
 
 The default Groq model is `whisper-large-v3-turbo`, matching this machine's normal xhisper recording path. The real API endpoint is `https://api.groq.com/openai/v1/audio/transcriptions`; `https://groq.com` is the provider website.
 
