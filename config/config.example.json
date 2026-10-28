@@ -53,5 +53,21 @@
       "response_path": "text",
       "options": {}
     }
-  }
+  },
+  "delivery_mode": "anchored",
+  "notify_completion": false,
+  "paste_rules": [
+    {
+      "match": {
+        "foreground_process": "codex|claude"
+      },
+      "chord": "ctrl+v"
+    },
+    {
+      "match": {
+        "window_name": "codex|claude"
+      },
+      "chord": "ctrl+v"
+    }
+  ]
 }

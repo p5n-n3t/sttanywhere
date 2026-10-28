@@ -44,3 +44,20 @@ python3 tests/integration_x11.py
 # Optional: isolated real terminal paste, no network
 python3 tests/integration_terminal.py
 ```
+
+## Background insertion correction — 2026-10-28
+
+The original keyboard approach above could raise the original window and paste at a changed caret. Those results apply to the now-explicit `delivery_mode: legacy` path. The installed configuration and default example now use `delivery_mode: anchored`.
+
+New verification:
+
+- **29 offline tests passed**, including valid/missing/changed accessibility anchors, clipboard fallback without xdotool input, and foreground/title/custom paste rules.
+- **Real Mousepad on an isolated Xvfb/D-Bus session passed** (`/usr/bin/python3 tests/integration_background.py`). The test inserted the marker after `first`, moved to another paragraph, typed `user elsewhere`, changed to a different Mousepad window, and ran the real accessibility delivery with a stubbed provider response. The original document became exactly `firstDICTATED\n\nsecond\nuser elsewhere`. The second window kept focus, and the original caret retained its logical position.
+- Deleting the original marker caused clipboard fallback; no text was inserted or deleted and focus stayed in the other window.
+- A real temporary PTY process named `codex` was correctly discovered as the sole foreground descendant. This tests OS process detection, not a real Codex provider session or actual Codex text insertion.
+- Inspection of the user's active Warp window reported no accessible editable text field and no unambiguous foreground TTY. Therefore background terminal insertion and active Codex identification in that Warp window are **not verified or claimed**. Results there remain on the clipboard for manual insertion.
+- Default rules select Ctrl+V for identifiable Codex/Claude foreground processes or matching window titles; other terminal contexts retain Ctrl+Shift+V fallback. Per-application rules are configurable.
+
+AT-SPI edits are bounded to a stored application PID/start token, accessible object path, and a unique unchanged marker in that field. No full document text is written to state files. No `windowactivate`, paste key, or BackSpace event is used by anchored completion. It does not call caret/selection setters during replacement, letting editor buffer marks track user edits naturally.
+
+The Mousepad regression uses no network request. Existing provider behavior remains covered by the prior live Groq check and current adapter tests. Background browser-tab support depends on the browser exposing and retaining the original editable object; it has not been validated here. Generic background insertion across arbitrary terminal applications is not implemented by X11 keystroke simulation.

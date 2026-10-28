@@ -19,6 +19,11 @@ import urllib.parse
 import urllib.request
 import uuid
 
+try:
+    from .paste_context import foreground_process, paste_chord
+except ImportError:
+    from paste_context import foreground_process, paste_chord
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = Path(os.environ.get('STTANYWHERE_CONFIG', Path(os.environ.get('XDG_CONFIG_HOME', Path.home()/'.config'))/'sttanywhere/config.json'))
 RUNTIME = Path('/tmp') / f'sttanywhere-{os.getuid()}'
@@ -126,6 +131,30 @@ def replace_placeholder(window, count, replacement):
     xdo('key', '--clearmodifiers', '--repeat', count, '--repeat-delay', '1', 'BackSpace')
     if replacement:
         type_text(replacement)
+
+
+def accessible(command, data):
+    result = subprocess.run(['/usr/bin/python3', str(ROOT/'lib/accessibility.py'), command],
+                            input=json.dumps(data), text=True, capture_output=True, timeout=12)
+    try:
+        output = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise ValueError('Accessibility bridge unavailable; result kept for manual paste') from None
+    if result.returncode:
+        raise ValueError(output.get('error', 'Accessibility operation failed'))
+    return output
+
+
+def target_context():
+    window = xdo('getactivewindow')
+    window_class = run('xprop', '-id', window, 'WM_CLASS')
+    window_name = xdo('getwindowname', window)
+    try:
+        pid = int(xdo('getwindowpid', window))
+    except (ValueError, subprocess.CalledProcessError):
+        pid = None
+    return dict(window=window, window_class=window_class, window_name=window_name,
+                window_pid=pid, foreground_process=foreground_process(pid))
 
 
 def endpoint(profile):
@@ -237,17 +266,24 @@ def worker(job):
         os.chmod(result_file, 0o600)
         # xclip intentionally forks its clipboard owner; it must survive this worker.
         subprocess.run(['xclip', '-selection', 'clipboard'], input=text.encode(), check=True)
-        if cfg.get('auto_paste', True):
+        if cfg.get('auto_paste', True) and cfg.get('delivery_mode', 'anchored') == 'legacy':
             replace_placeholder(state['window'], 19, '')
-            terminal = re.search(cfg.get('terminal_pattern', 'warp|terminal|kitty|xterm'), state['window_class'], re.I)
-            mode = cfg.get('paste_mode', 'auto')
-            chord = 'ctrl+shift+v' if mode == 'terminal' or (mode == 'auto' and terminal) else 'ctrl+v'
+            chord = paste_chord(cfg, state)
             xdo('key', '--clearmodifiers', chord)
             state['status'] = 'done'
-            notify('Transcription pasted.')
+        elif cfg.get('auto_paste', True) and state.get('anchor'):
+            try:
+                state['anchor'] = accessible('replace', {**state['anchor'], 'replacement': text})
+                state['status'] = 'done'
+                state['delivery'] = 'accessibility-background'
+            except Exception as error:
+                state['status'] = 'clipboard'
+                state['delivery_reason'] = str(error)
         else:
             state['status'] = 'clipboard'
-            notify('Transcription copied. Replace the placeholder and paste when ready.')
+            state['delivery_reason'] = state.get('anchor_error', 'Automatic insertion disabled')
+        if cfg.get('notify_completion', False):
+            notify('Transcription inserted in the original text field.' if state['status'] == 'done' else 'Transcription ready on clipboard; use your paste shortcut or sttanywhere paste.')
         # Successful audio is deleted; transcript retained privately for recovery.
         (job/'audio.wav').unlink(missing_ok=True)
     except Exception as error:
@@ -266,7 +302,14 @@ def toggle(cfg, profile):
         if active.exists():
             state = json.loads(active.read_text())
             stop_recorder(state)  # signal recorder before any desktop operations
-            replace_placeholder(state['window'], 16, TRANSCRIBING+' ')
+            if state['config'].get('delivery_mode', 'anchored') == 'legacy':
+                replace_placeholder(state['window'], 16, TRANSCRIBING+' ')
+            elif state.get('anchor'):
+                try:
+                    state['anchor'] = accessible('replace', {**state['anchor'], 'replacement': TRANSCRIBING+' '})
+                except Exception as error:
+                    state['anchor_error'] = str(error)
+                    state.pop('anchor', None)
             state['status'] = 'transcribing'
             job = Path(state['job'])
             write_json(job/'state.json', state)
@@ -282,19 +325,22 @@ def toggle(cfg, profile):
                 notify('A transcription is still running. Use status or cancel.')
                 return
         key_for(profile)  # fail before touching any editable field
-        window = xdo('getactivewindow')
-        # Ubuntu's xdotool has no getwindowclassname command. Query WM_CLASS
-        # via xprop while xdotool supplies the captured ID and window name.
-        window_class = run('xprop', '-id', window, 'WM_CLASS')
-        window_name = xdo('getwindowname', window)
+        context = target_context()
+        window = context['window']
         job = Path(tempfile.mkdtemp(prefix='job-', dir=base))
         os.chmod(job, 0o700)
         logfile = (job/'recorder.log').open('ab')
         recorder = subprocess.Popen(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'pulse', '-i', cfg.get('audio_source', 'default'), '-t', str(cfg.get('max_recording_seconds', 600)), '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', str(job/'audio.wav')], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=logfile, start_new_session=True)
         logfile.close()
-        state = dict(status='recording', job=str(job), window=window, window_class=window_class, window_name=window_name, recorder_pid=recorder.pid, recorder_token=proc_token(recorder.pid), config=cfg, profile=profile)
+        state = dict(status='recording', job=str(job), **context, recorder_pid=recorder.pid, recorder_token=proc_token(recorder.pid), config=cfg, profile=profile)
         try:
-            type_text(RECORDING+' ')
+            if cfg.get('delivery_mode', 'anchored') == 'legacy':
+                type_text(RECORDING+' ')
+            else:
+                try:
+                    state['anchor'] = accessible('capture', {'pid': context['window_pid'], 'marker': RECORDING+' '})
+                except Exception as error:
+                    state['anchor_error'] = str(error)
             time.sleep(.15)
             if recorder.poll() is not None:
                 raise ValueError(f'Microphone recording failed; see {job}/recorder.log')
@@ -302,8 +348,10 @@ def toggle(cfg, profile):
             write_json(active, state)
         except Exception:
             stop_recorder(state)
-            # Placeholder is still at the current caret here.
-            replace_placeholder(window, 16, '')
+            if state.get('anchor'):
+                accessible('replace', {**state['anchor'], 'replacement': ''})
+            elif cfg.get('delivery_mode', 'anchored') == 'legacy':
+                replace_placeholder(window, 16, '')
             raise
 
 
@@ -331,7 +379,7 @@ def cancel():
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', nargs='?', default='toggle', choices=['toggle', 'status', 'cancel', 'doctor', 'transcribe', '_worker'])
+    parser.add_argument('command', nargs='?', default='toggle', choices=['toggle', 'status', 'cancel', 'doctor', 'transcribe', 'paste', 'context', '_worker'])
     parser.add_argument('file', nargs='?')
     args = parser.parse_args()
     if args.command == '_worker':
@@ -344,10 +392,22 @@ def main():
         base = runtime()
         for path in sorted(base.glob('job-*/state.json')):
             state = json.loads(path.read_text())
-            print(json.dumps({k: state.get(k) for k in ('status', 'job', 'window', 'error')}))
+            print(json.dumps({k: state.get(k) for k in ('status', 'job', 'window', 'delivery', 'delivery_reason', 'anchor_error', 'error')}))
         return
     cfg, profile = load_config()
-    if args.command == 'doctor':
+    if args.command == 'context':
+        context = target_context()
+        context['paste_chord'] = paste_chord(cfg, context)
+        try:
+            context['background_insertion'] = accessible('probe', {'pid': context['window_pid']})
+        except Exception as error:
+            context['background_insertion'] = {'supported': False, 'reason': str(error)}
+        print(json.dumps(context, indent=2))
+    elif args.command == 'paste':
+        # Explicit user action at the current field; never refocus an old target.
+        context = target_context()
+        xdo('key', '--clearmodifiers', paste_chord(cfg, context))
+    elif args.command == 'doctor':
         missing = [name for name in ('xdotool', 'xprop', 'xclip', 'ffmpeg', 'notify-send', 'xfconf-query', 'pactl') if not shutil.which(name)]
         key_for(profile)
         endpoint(profile)
@@ -359,6 +419,7 @@ def main():
         print('X11 active window:', xdo('getactivewindow'))
         print('Audio:', run('pactl', 'get-default-source'))
         print('Shortcut:', cfg.get('shortcut', '<Alt>x'))
+        print('Delivery:', cfg.get('delivery_mode', 'anchored'), '| unsupported fields: clipboard, no refocus')
     elif args.command == 'transcribe':
         if not args.file:
             parser.error('transcribe requires an audio file')

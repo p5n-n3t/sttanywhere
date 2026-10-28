@@ -214,7 +214,7 @@ class RuntimeAndDesktopTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         job = Path(temp.name)
         (job / "audio.wav").write_bytes(b"audio")
-        state = {"status": "transcribing", "config": {"auto_paste": True, "paste_mode": mode},
+        state = {"status": "transcribing", "config": {"auto_paste": True, "delivery_mode": "legacy", "paste_mode": mode},
                  "profile": {}, "window": "123", "window_class": window_class}
         (job / "state.json").write_text(json.dumps(state))
         runtime_dir = job / "runtime"
@@ -227,6 +227,70 @@ class RuntimeAndDesktopTests(unittest.TestCase):
         self.assertEqual(replace.call_args.args, ("123", 19, ""))
         self.assertEqual(json.loads((job / "state.json").read_text())["status"], "done")
         return xdo.call_args.args
+
+    def _anchored_worker_job(self, state_updates=None):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        job = Path(temp.name)
+        (job / "audio.wav").write_bytes(b"audio")
+        state = {"status": "transcribing", "config": {"auto_paste": True},
+                 "profile": {}, "window": "123", "window_class": "kitty"}
+        state.update(state_updates or {})
+        (job / "state.json").write_text(json.dumps(state))
+        runtime_dir = job / "runtime"
+        runtime_dir.mkdir(mode=0o700)
+        return job, runtime_dir
+
+    def test_anchored_worker_without_anchor_uses_clipboard_without_focus(self):
+        job, runtime_dir = self._anchored_worker_job({"anchor_error": "No focused editable field"})
+        with mock.patch.object(stt, "transcribe", return_value="safe fallback"), \
+             mock.patch.object(stt.subprocess, "run"), mock.patch.object(stt, "accessible") as accessible, \
+             mock.patch.object(stt, "xdo") as xdo, mock.patch.object(stt, "replace_placeholder") as replace, \
+             mock.patch.object(stt, "notify"), mock.patch.object(stt, "runtime", return_value=runtime_dir):
+            stt.worker(str(job))
+        state = json.loads((job / "state.json").read_text())
+        self.assertEqual(state["status"], "clipboard")
+        self.assertEqual(state["delivery_reason"], "No focused editable field")
+        self.assertEqual((job / "transcript.txt").read_text(), "safe fallback")
+        accessible.assert_not_called()
+        xdo.assert_not_called()
+        replace.assert_not_called()
+
+    def test_anchored_worker_replaces_valid_accessible_anchor_without_xdo(self):
+        anchor = {"pid": 321, "process_token": "token", "path": "0/2/1",
+                  "marker": stt.RECORDING + " "}
+        job, runtime_dir = self._anchored_worker_job({"anchor": anchor})
+        updated = {**anchor, "marker": "transcribed words"}
+        with mock.patch.object(stt, "transcribe", return_value="transcribed words"), \
+             mock.patch.object(stt.subprocess, "run"), \
+             mock.patch.object(stt, "accessible", return_value=updated) as accessible, \
+             mock.patch.object(stt, "xdo") as xdo, mock.patch.object(stt, "replace_placeholder") as replace, \
+             mock.patch.object(stt, "notify"), mock.patch.object(stt, "runtime", return_value=runtime_dir):
+            stt.worker(str(job))
+        state = json.loads((job / "state.json").read_text())
+        self.assertEqual(state["status"], "done")
+        self.assertEqual(state["delivery"], "accessibility-background")
+        accessible.assert_called_once_with("replace", {**anchor, "replacement": "transcribed words"})
+        xdo.assert_not_called()
+        replace.assert_not_called()
+
+    def test_moved_or_deleted_anchor_falls_back_to_clipboard_and_preserves_transcript(self):
+        anchor = {"pid": 321, "process_token": "token", "path": "0/2/1",
+                  "marker": stt.RECORDING + " "}
+        job, runtime_dir = self._anchored_worker_job({"anchor": anchor})
+        with mock.patch.object(stt, "transcribe", return_value="recoverable transcript"), \
+             mock.patch.object(stt.subprocess, "run"), \
+             mock.patch.object(stt, "accessible", side_effect=ValueError("Original marker was changed or removed")), \
+             mock.patch.object(stt, "xdo") as xdo, mock.patch.object(stt, "replace_placeholder") as replace, \
+             mock.patch.object(stt, "notify"), mock.patch.object(stt, "runtime", return_value=runtime_dir):
+            stt.worker(str(job))
+        state = json.loads((job / "state.json").read_text())
+        self.assertEqual(state["status"], "clipboard")
+        self.assertEqual(state["delivery_reason"], "Original marker was changed or removed")
+        self.assertEqual((job / "transcript.txt").read_text(), "recoverable transcript")
+        self.assertFalse((job / "audio.wav").exists())
+        xdo.assert_not_called()
+        replace.assert_not_called()
 
     def test_worker_uses_terminal_paste_chord_for_terminal(self):
         self.assertEqual(self._run_worker_and_get_chord("kitty"),
@@ -245,7 +309,7 @@ class RuntimeAndDesktopTests(unittest.TestCase):
             job = Path(temp)
             (job / "audio.wav").write_bytes(b"audio")
             (job / "state.json").write_text(json.dumps({
-                "status": "transcribing", "config": {"auto_paste": True}, "profile": {},
+                "status": "transcribing", "config": {"auto_paste": True, "delivery_mode": "legacy"}, "profile": {},
                 "window": "123", "window_class": "firefox",
             }))
             runtime_dir = job / "runtime"

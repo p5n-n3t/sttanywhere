@@ -43,7 +43,7 @@ def main():
             job.mkdir(mode=0o700)
             (job/'audio.wav').write_bytes(b'test audio')
             window_class = subprocess.check_output(['xprop', '-id', window, 'WM_CLASS'], env=env, text=True)
-            (job/'state.json').write_text(json.dumps({'status':'transcribing', 'window':window, 'window_class':window_class, 'config':{'auto_paste':True}, 'profile':{}}))
+            (job/'state.json').write_text(json.dumps({'status':'transcribing', 'window':window, 'window_class':window_class, 'config':{'auto_paste':True,'delivery_mode':'legacy'}, 'profile':{}}))
             script = 'from lib import sttanywhere as s; import sys; s.transcribe=lambda *a:"Terminal paste works."; s.worker(sys.argv[1])'
             subprocess.run([sys.executable, '-c', script, str(job)], cwd=ROOT, env=env, check=True)
             assert json.loads((job/'state.json').read_text())['status'] == 'done'

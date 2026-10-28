@@ -50,7 +50,7 @@ def main():
         sink = 'sttanywhere_test_'+str(os.getpid())
         module = subprocess.check_output(['pactl', 'load-module', 'module-null-sink', 'sink_name='+sink], env=env, text=True).strip()
         cfg = json.loads((Path.home()/'.config/sttanywhere/config.json').read_text())
-        cfg.update(provider='groq', audio_source=sink+'.monitor', auto_paste=True)
+        cfg.update(delivery_mode='legacy', provider='groq', audio_source=sink+'.monitor', auto_paste=True)
         config_path = base/'config.json'
         config_path.write_text(json.dumps(cfg))
         env['STTANYWHERE_CONFIG'] = str(config_path)

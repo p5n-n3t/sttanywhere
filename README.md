@@ -2,27 +2,28 @@
 
 <p align="center"><img src="assets/logo.svg" alt="STT Anywhere microphone and cursor logo" width="144"></p>
 
-Local, keyboard-driven speech dictation for Xubuntu and other X11 desktops. Press **Alt+X** to start or stop recording; STT Anywhere transcribes the audio and pastes the result into the text field in the original X11 window.
+Local, keyboard-driven speech dictation for Xubuntu and other X11 desktops. Press **Alt+X** to start or stop recording; STT Anywhere transcribes the audio and, when the focused application exposes a supported editable text field through AT-SPI, replaces its recording marker with the transcript in that same field.
 
-STT Anywhere is a small Bash launcher and Python standard-library client. Audio capture and desktop integration use the X11/Linux utilities installed by the setup script; transcription is sent to a provider you configure. The project does not bundle a speech model or make provider calls until you record or transcribe a file.
+STT Anywhere uses a small Bash launcher and Python client. Audio capture and clipboard/X11 integration use Linux desktop utilities; anchored insertion uses the system Python with PyGObject and AT-SPI. Transcription is sent to a provider you configure. The project does not bundle a speech model or make provider calls until you record or transcribe a file.
 
 ## What it does
 
 - Records from the default microphone and transcribes on toggle, or transcribes an existing audio file.
 - Supports Groq (the example default) and OpenAI-compatible multipart transcription, AssemblyAI's asynchronous upload/transcription flow, and Cloudflare's base64 JSON transcription endpoint through provider profiles. A custom OpenAI-compatible profile is also included as a template.
-- Inserts the result at the focused text cursor and provides status, cancellation, and diagnostics commands.
+- Captures the focused editable AT-SPI text object and inserts a unique marker there. At completion it replaces that exact marker in the same object, even if the caret moved meanwhile.
+- Provides clipboard-only fallback, status, cancellation, diagnostics, foreground context, and an explicit paste command.
 - Offers an installer for the **Alt+X** Xfce keyboard shortcut and migration from an existing xhisper setup.
 
-Desktop text insertion depends on the target application accepting simulated keyboard input. The program saves and reactivates the original X11 window, but a window ID cannot restore a browser tab or a cursor position inside that window. If either changes before the result is pasted, it may land in a different tab or field. Review the destination before dictating sensitive text. Set `auto_paste` to `false` to keep the result on the clipboard and paste it yourself.
+Anchored insertion uses AT-SPI editable-text APIs; it does not activate a window or send typing keys at transcription completion. It records the target process ID and start token, accessible object path, and marker, then replaces the marker only if that exact marker remains unique in the original editable object. If the field is unsupported, the anchor is ambiguous or removed, or the app process changes, STT Anywhere leaves the destination untouched and keeps the transcript on the clipboard and in the private recovery file; it does not type the transcript into another target. If an anchor was captured but cannot be replaced, or automatic replacement is disabled, the marker may remain in the field and should be replaced manually. Browser tabs and rich editors are supported only when they expose the focused editable object through AT-SPI; STT Anywhere does not enumerate tabs or infer which one the user intends. Anchored mode is not universal terminal support. For editor workflows that need keyboard paste, see `delivery_mode: "legacy"` and the explicit `paste` command below.
 
 ## Requirements
 
 - Xubuntu (or a compatible Linux desktop) using X11 and Xfce for the supplied shortcut setup.
-- Bash, Python 3, and the system audio, clipboard, and X11 utilities required by the installer and text insertion path, including `xdotool` and `xprop`.
+- Bash, Python 3, and the system audio, clipboard, accessibility, and X11 utilities installed by `./install.sh --deps`, including `python3-gi`, `gir1.2-atspi-2.0`, `xdotool`, and `xprop`.
 - An account and API key for one of the configured transcription providers.
 - Network access when requesting a transcription.
 
-The installer and `doctor` command report missing local prerequisites. The implementation uses Python's standard library for the provider HTTP requests; no Python package installation is required.
+The installer and `doctor` command report missing local prerequisites. Provider HTTP requests use Python's standard library. The accessibility bridge runs with `/usr/bin/python3` and the system-installed GI/AT-SPI bindings; no pip package installation is required.
 
 ## Install
 
@@ -54,16 +55,22 @@ sttanywhere toggle             # start or stop a microphone dictation
 sttanywhere status             # show recording/transcription state
 sttanywhere cancel             # cancel the active operation
 sttanywhere doctor             # inspect local dependencies and configuration
+sttanywhere context            # describe the currently focused application and paste chord
+sttanywhere paste              # paste clipboard into the currently focused application
 sttanywhere transcribe clip.wav # transcribe an existing audio file
 ```
 
-The toggle records from the PulseAudio/PipeWire default input and submits the audio once to the selected provider. A successful result is copied to the clipboard. With the default `auto_paste: true`, STT Anywhere tries to replace its placeholder in the original X11 window and paste the result there. It uses `xdotool` to capture the active window ID and window name, and `xprop` to read its `WM_CLASS`; Ubuntu's `xdotool` does not provide a `getwindowclassname` command. Set `auto_paste` to `false` to avoid automated window activation and paste; the result remains on the clipboard and you replace the placeholder and paste it yourself. `paste_mode` controls the paste chord (`auto` or `terminal`). `transcribe FILE` submits the named file through the selected provider profile without inserting it into an application. Provider requests require network access and may consume provider quota or incur charges under that provider's terms. Requests are not automatically retried.
+The toggle records from the PulseAudio/PipeWire default input and submits the audio once to the selected provider. A successful result is copied to the clipboard. With the default `delivery_mode: "anchored"`, the result replaces the unique recording marker in the original AT-SPI editable object. If an anchor cannot be safely captured or verified, the status is `clipboard`; the transcript stays on the clipboard and in the recovery file, with no typing sent to another target. `auto_paste: false` disables automatic replacement; if a marker was inserted, replace it manually and paste the clipboard text. Completion notifications are off by default (`notify_completion: false`).
+
+`sttanywhere context` prints JSON with `window_class`, `window_name`, `window_pid`, `foreground_process`, and the selected `paste_chord` (as well as the X11 window ID). It uses `xdotool` for the active window ID/name and `xprop` for `WM_CLASS`, since Ubuntu's `xdotool` does not provide a `getwindowclassname` command. Foreground process detection only reports a terminal descendant when exactly one TTY candidate is unambiguous; multiple tabs or sessions produce an unknown value instead of a guess. The `paste` command sends the configured chord to the field that is focused when you invoke it; it does not refocus the window captured at recording start.
+
+`transcribe FILE` submits the named file through the selected provider profile without inserting it into an application. Provider requests require network access and may consume provider quota or incur charges under that provider's terms. Requests are not automatically retried.
 
 Recordings and per-job status are kept under `/tmp/sttanywhere-UID/job-*` with private permissions. A successful transcription removes its audio file and retains the transcript for recovery; failed or cancelled jobs may leave audio and logs there. Remove job directories when you no longer need their recovery files; `/tmp` is normally cleared when the machine reboots.
 
 The installer also supports `./install.sh --deps` to install system dependencies and `./install.sh --no-bind` to skip the Xfce shortcut setup. These options are useful for reviewing or separating the setup steps.
 
-The insertion flow uses one trailing space on each placeholder so its fixed Backspace counts can remove them: `(Recording....) ` has 16 characters, and `(Transcribing....) ` has 19. The single trailing space is padding. It is not added to the dictated transcript.
+The legacy keyboard mode uses one trailing space on each placeholder so its fixed Backspace counts can remove them: `(Recording....) ` has 16 characters, and `(Transcribing....) ` has 19. Anchored mode inserts and replaces these markers through the captured accessible text object. The single trailing space is marker padding, not part of the transcript.
 
 ## Configuration and privacy
 
@@ -83,8 +90,29 @@ The insertion flow uses one trailing space on each placeholder so its fixed Back
 | `max_audio_bytes` | `25000000` | Upper bound on the audio file submitted. |
 | `request_timeout` | `90` | Timeout in seconds for an individual HTTP request. |
 | `job_timeout` | `300` | AssemblyAI asynchronous job deadline. |
-| `auto_paste` | `true` | Try to return to the original window, replace the placeholder, and paste. |
-| `paste_mode` | `auto` | Use terminal paste chord when the window class matches `terminal_pattern`; otherwise use regular paste. Set to `terminal` to always use the terminal chord. |
+| `delivery_mode` | `anchored` | `anchored` replaces the original AT-SPI marker in place. `legacy` opts into the older focus-and-keyboard insertion flow. |
+| `auto_paste` | `true` | In anchored mode, automatically replace the marker in the captured editable object. In legacy mode, control the older keyboard paste behavior. |
+| `notify_completion` | `false` | Show a desktop notification when a transcription finishes. |
+| `paste_rules` | app-specific | Ordered matches for context fields such as `foreground_process`, `window_name`, and `window_class`; the first match selects a chord. |
+| `paste_mode` | `auto` | Fallback chord: terminal paste for a `window_class` matching `terminal_pattern`, otherwise regular paste. `terminal` always uses the terminal chord. |
+
+The example config has two paste rules for Codex/Claude contexts: first `foreground_process`, then `window_name`, each mapped to `ctrl+v`. If neither matches, the default terminal fallback uses `ctrl+shift+v`; other windows use `ctrl+v`. Rules choose a chord for the explicit `sttanywhere paste` command; anchored delivery edits the accessible text object directly and does not use paste chords.
+
+For example, add or adjust per-app rules like this:
+
+```json
+{
+  "delivery_mode": "anchored",
+  "paste_mode": "auto",
+  "paste_rules": [
+    {"match": {"foreground_process": "codex|claude"}, "chord": "ctrl+v"},
+    {"match": {"window_name": "codex|claude"}, "chord": "ctrl+v"},
+    {"match": {"window_class": "my-terminal"}, "chord": "ctrl+shift+v"}
+  ]
+}
+```
+
+`delivery_mode: "legacy"` is an explicit opt-in for the older keyboard flow. It activates the captured X11 window at stop/completion and sends Backspace/paste keystrokes, so it can move desktop focus and still cannot restore a browser tab or the original caret. The `paste` command is also a keyboard action, but it targets whichever field is currently focused when you invoke it.
 
 Provider profiles specify an adapter (`openai`, `assemblyai`, `json_base64`, or `raw`), HTTPS endpoint, model, credential variable name, and response path as needed. The example includes Groq, OpenAI, AssemblyAI, Cloudflare Workers AI, and a custom OpenAI-compatible profile. Compatibility depends on the selected service's API; custom endpoints have not been validated against every provider.
 
@@ -113,11 +141,13 @@ MIT. See [`LICENSE`](LICENSE).
 
 ## Live integration checks
 
-The opt-in test below opens an isolated Xvfb desktop and loops generated speech through a private PulseAudio sink, then sends **one live, potentially billable Groq request**. It checks the actual editor contents, prefix preservation, clipboard and audio cleanup. It does not type into the host desktop or play through your speakers. Extra test dependencies: `xvfb xfwm4 dbus-x11 python3-tk espeak pulseaudio-utils`.
+The opt-in test below opens an isolated Xvfb desktop and loops generated speech through a private PulseAudio sink, then sends **one live, potentially billable Groq request**. It checks the legacy keyboard-paste path only; it does not verify anchored insertion in a live Codex or Claude application. It does not type into the host desktop or play through your speakers. Extra test dependencies: `xvfb xfwm4 dbus-x11 python3-tk espeak pulseaudio-utils`.
 
 ```bash
 python3 tests/integration_x11.py
 ```
+
+`/usr/bin/python3 tests/integration_background.py` exercises the anchored path against a real Mousepad editor in an isolated Xvfb session, with a mocked transcription response and no provider request. It checks replacement in the original accessible object after the caret moves, preservation of other edits, no focus stealing, and clipboard fallback when the marker is gone. `tests/integration_x11.py` and `tests/integration_terminal.py` cover the legacy keyboard flow; the terminal check uses a stub transcription and makes no network request. These checks do not establish universal browser or terminal support.
 
 The default Groq model is `whisper-large-v3-turbo`, matching this machine's normal xhisper recording path. The real API endpoint is `https://api.groq.com/openai/v1/audio/transcriptions`; `https://groq.com` is the provider website.
 
