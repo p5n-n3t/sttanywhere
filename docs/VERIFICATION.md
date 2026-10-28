@@ -67,3 +67,14 @@ New verification:
 AT-SPI edits are bounded to a stored application PID/start token, accessible object path, and a unique unchanged marker in that field. No full document text is written to state files. No `windowactivate`, paste key, or BackSpace event is used by anchored completion. It does not call caret/selection setters during replacement, letting editor buffer marks track user edits naturally.
 
 The Mousepad regression uses no network request. Existing provider behavior remains covered by the prior live Groq check and current adapter tests. Background browser-tab support depends on the browser exposing and retaining the original editable object; it has not been validated here. Generic background insertion across arbitrary terminal applications is not implemented by X11 keystroke simulation.
+
+## Guided terminal installer — 2026-10-28
+
+The installer now offers a five-step terminal wizard, a final plan confirmation, masked key replacement, read-only preview, configuration overrides and explicit unattended mode. It makes no API calls or automatic microphone recordings.
+
+- **41 offline unit tests passed**: previous runtime/provider coverage plus configuration preservation, credential precedence, data-only legacy parsing, preview redaction, dry-run with dependencies, no-bind preparation, shortcut-conflict preflight, invalid settings, masked replacement, cancellation and non-TTY behavior.
+- **Real pseudo-terminal tests passed** (`python3 tests/integration_installer.py`), using isolated temporary HOME/config directories. They exercised dry-run, early cancellation and actual no-bind application. A replacement test key did not appear in terminal output; the private file was mode 0600, another key and an unrelated config field survived, and previous credentials were backed up.
+- **Actual desktop noninteractive reinstall passed**: existing config.json and credentials.env stayed byte-for-byte identical; both remained mode 0600. The installed CLI symlink, current Alt+X binding and `doctor` output were verified. No secret value was printed.
+- Shell syntax, Python compilation and whitespace checks passed.
+
+Dependency installation is previewed and tested through mocks; these checks did not install operating-system packages. Packages are not automatically uninstalled on later failure. Config and credentials use atomic file replacement with private backups; the installer does not claim a transaction spanning package installation, systemd and desktop settings. Backups support manual recovery after an interrupted apply. Automatic rollback, resumable setup, a GUI and native macOS/Windows installers are not implemented.

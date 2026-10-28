@@ -44,13 +44,37 @@ The installer and `doctor` command report missing local prerequisites. Provider 
 
 ## Install
 
-From a checkout, run:
+From a checkout in a terminal, run the guided setup:
 
 ```bash
 ./install.sh
 ```
 
-The installer creates the user configuration directory, prepares a private credentials file, and configures the Xfce **Alt+X** binding. If it finds the legacy xhisper `~/.env` setup, it migrates the Groq credential and disables the old binding/services so they do not compete with the new shortcut. Inspect the installer before running it if you want to review those changes.
+When both stdin and stdout are terminals, `./install.sh` starts a five-step wizard. In scripts and other non-TTY contexts it uses saved/default settings without prompts. Use `--interactive` to require guided setup (it errors without a TTY), or `--non-interactive` to explicitly disable prompts.
+
+The wizard guides you through provider/model/endpoint, audio source, shortcut and delivery mode, credentials, dependencies and a final plan review. For a custom provider it also asks for adapter, key environment name and transcript response path. It lists available microphone sources when the audio service responds, but does not record a microphone sample. You can choose anchored insertion, clipboard-only delivery, or the legacy keyboard-paste mode. Press Enter to keep a current value; type `cancel` at a prompt to exit without applying the plan.
+
+Existing credentials are reused by default in this order: private `credentials.env`, matching process environment variable, then legacy `~/.env` for Groq. A replacement key is entered through hidden input; values are not displayed in the preview. Endpoint account variables such as `CLOUDFLARE_ACCOUNT_ID` can be supplied when prompted. Existing config fields and unrelated credential assignments are preserved. Before applying config files, the installer performs a read-only shortcut and desktop preflight when shortcut setup is selected. It creates private backups before writing configuration or changing bindings.
+
+The last step shows the provider, endpoint, microphone source, delivery mode, shortcut, credential presence, package plan and backup behavior. Only typing `yes` applies the plan. Dependency installation runs `apt-get` after that confirmation when selected. The wizard does not send provider requests, test API keys, or record audio automatically.
+
+| Option | Effect |
+| --- | --- |
+| `--dry-run` | Show the plan without changing files, installing packages or binding shortcuts. This remains read-only with `--deps`. |
+| `--deps` | Offer/install the Debian or Ubuntu packages after final confirmation. |
+| `--no-bind` | Prepare private configuration but leave shortcuts and xhisper services/settings untouched. |
+| `--provider NAME` | Select an existing profile. |
+| `--model NAME` / `--endpoint URL` | Override the selected profile's model or HTTPS endpoint. |
+| `--shortcut KEY` / `--audio-source SOURCE` | Override the shortcut or PulseAudio/PipeWire source. |
+| `--delivery-mode anchored\|clipboard\|legacy` | Select supported anchored delivery, manual clipboard delivery, or legacy keyboard paste. |
+
+For example, preview settings for a script without prompts or mutations:
+
+```bash
+./install.sh --non-interactive --dry-run --delivery-mode anchored
+```
+
+With shortcut setup selected, the installer saves backups and disables old xhisper shortcuts/services as part of migration. It does not automatically roll back partial changes if a later operation fails; use the printed backup and [restore instructions](#restore-the-previous-setup) to recover manually.
 
 Configuration lives in `~/.config/sttanywhere/config.json`. Credentials belong in `~/.config/sttanywhere/credentials.env`; keep this file private and never commit it. The example provider profiles are in [`config/config.example.json`](config/config.example.json).
 

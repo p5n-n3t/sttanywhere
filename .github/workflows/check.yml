@@ -23,3 +23,5 @@ jobs:
           bash -n install.sh
       - name: Run unit tests
         run: python3 -m unittest discover -s tests
+      - name: Verify guided installer in a real terminal
+        run: python3 tests/integration_installer.py

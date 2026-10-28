@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Migration is intentional: back up xhisper configuration, stop and disable its
-# user services/processes/autostart, remove xhisper shortcuts, then bind STT Anywhere.
-# No existing configuration or credential is deleted. Run without sudo.
+# Guided on a terminal; --non-interactive for scripts; --dry-run previews only.
+# Applying shortcut setup backs up xhisper config, stops/disables its user
+# services/processes/autostart, and replaces its XFCE shortcuts. Run without sudo.
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [[ "${1:-}" == --deps ]]; then
-  sudo apt-get update
-  sudo apt-get install -y python3 python3-gi gir1.2-atspi-2.0 ffmpeg pulseaudio-utils xdotool xclip x11-utils libnotify-bin xfconf
-  shift
-fi
 exec python3 "$ROOT/lib/install.py" "$@"

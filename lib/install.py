@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Idempotent XFCE installation with private, reversible migration backups."""
-import argparse
 import datetime
 import json
 import os
@@ -19,18 +18,44 @@ def call(*args, check=True):
     return subprocess.run(args, check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--no-bind', action='store_true', help='Prepare config only, leave xhisper and shortcuts untouched')
-    args = parser.parse_args()
-    os.umask(0o077)
-    home = Path.home()
-    config_home = Path(os.environ.get('XDG_CONFIG_HOME', home/'.config'))
-    dest = config_home/'sttanywhere'
+try:
+    from . import setup_wizard as setup
+except ImportError:
+    import setup_wizard as setup
+
+
+def preflight(plan):
+    link = plan['home']/'.local/bin/sttanywhere'
+    if link.exists() or link.is_symlink():
+        if not link.is_symlink() or link.resolve() != ROOT/'bin/sttanywhere':
+            raise ValueError(f'Refusing to replace unrelated executable: {link}')
+    if plan['no_bind']:
+        return '', ''
+    if not os.environ.get('DISPLAY'):
+        raise ValueError('Run from the Xubuntu desktop or use --no-bind to prepare config only')
+    for binary in setup.DEPENDENCIES:
+        if not shutil.which(binary):
+            raise ValueError(f'Missing {binary}; rerun with --deps or --no-bind')
+    listing = call('xfconf-query', '-c', 'xfce4-keyboard-shortcuts', '-lv').stdout
+    shortcut = '/commands/custom/'+plan['config']['shortcut']
+    for line in listing.splitlines():
+        fields = line.split(None, 1)
+        if len(fields) == 2 and fields[0] == shortcut:
+            value = fields[1]
+            if 'xhisper' not in value.lower() and str(ROOT/'bin/sttanywhere') not in value:
+                raise ValueError(f'{shortcut} belongs to another command; choose another shortcut')
+    units = call('systemctl', '--user', 'list-unit-files', '--no-legend', '--no-pager', check=False)
+    if units.returncode:
+        raise ValueError('Cannot connect to user systemd; run from your desktop session or use --no-bind')
+    return listing, units.stdout
+
+
+def apply(plan, listing, unit_listing):
+    home, config_home, dest = plan['home'], plan['config_home'], plan['dest']
+    cfg = plan['config']
+    config_path, credentials = dest/'config.json', dest/'credentials.env'
     dest.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(dest, 0o700)
-    config_path = dest/'config.json'
-    credentials = dest/'credentials.env'
     backup = dest/'backups'/datetime.datetime.now().strftime('%Y%m%dT%H%M%S%f')
     backup.mkdir(parents=True, mode=0o700)
     for path in (home/'.env', config_home/'xhisper', config_path, credentials, config_home/'xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml'):
@@ -39,24 +64,10 @@ def main():
         elif path.is_file():
             shutil.copy2(path, backup/path.name)
             os.chmod(backup/path.name, 0o600)
-    cfg = json.loads(config_path.read_text()) if config_path.exists() else json.loads((ROOT/'config/config.example.json').read_text())
-    # Read data rather than source an arbitrary old shell startup file.
-    key = os.environ.get('GROQ_API_KEY', '')
-    if not key and (home/'.env').exists():
-        for line in (home/'.env').read_text().splitlines():
-            match = re.match(r'^\s*(?:export\s+)?GROQ_API_KEY\s*=\s*(.*)$', line)
-            if match:
-                values = shlex.split(match[1], comments=True)
-                if len(values) == 1:
-                    key = values[0]
-    if not credentials.exists():
-        if key:
-            credentials.write_text('# Private; never commit. Environment used by the global shortcut.\nGROQ_API_KEY='+shlex.quote(key)+'\n')
-        else:
-            credentials.write_text('# Add GROQ_API_KEY here or export it in your desktop session.\n')
-    os.chmod(credentials, 0o600)
-    config_path.write_text(json.dumps(cfg, indent=2)+'\n')
-    os.chmod(config_path, 0o600)
+    print(f'Recovery backup: {backup}')
+    # Atomic private replacements; unrelated settings and key assignments survive.
+    atomic_write(config_path, json.dumps(cfg, indent=2)+'\n')
+    atomic_write(credentials, plan['credentials'])
     bindir = home/'.local/bin'
     bindir.mkdir(parents=True, exist_ok=True)
     link = bindir/'sttanywhere'
@@ -65,16 +76,9 @@ def main():
             raise ValueError(f'Refusing to replace unrelated executable: {link}')
     else:
         link.symlink_to(ROOT/'bin/sttanywhere')
-    if args.no_bind:
+    if plan['no_bind']:
         print(f'Configuration prepared; xhisper untouched. Private backups: {backup}')
         return
-    if not os.environ.get('DISPLAY'):
-        raise ValueError('Run installation from the Xubuntu desktop (DISPLAY unset)')
-    for binary in ('xdotool', 'xprop', 'xclip', 'ffmpeg', 'notify-send', 'xfconf-query', 'pactl'):
-        if not shutil.which(binary):
-            raise ValueError(f'Missing {binary}; run ./install.sh --deps')
-    # Confirm live XFCE connection before modifying old services or bindings.
-    listing = call('xfconf-query', '-c', 'xfce4-keyboard-shortcuts', '-lv').stdout
     shortcut = '/commands/custom/'+cfg.get('shortcut', '<Alt>x')
     old_bindings = []
     occupied = None
@@ -90,11 +94,8 @@ def main():
     if occupied and 'xhisper' not in occupied.lower() and str(ROOT/'bin/sttanywhere') not in occupied:
         raise ValueError(f'{shortcut} belongs to another command; change shortcut in config.json first')
     (backup/'shortcuts.json').write_text(json.dumps(old_bindings, indent=2))
-    units = call('systemctl', '--user', 'list-unit-files', '--no-legend', '--no-pager', check=False)
-    if units.returncode:
-        raise ValueError('Cannot connect to user systemd; run from your desktop session')
     disabled = []
-    for line in units.stdout.splitlines():
+    for line in unit_listing.splitlines():
         unit = line.split()[0] if line.split() else ''
         if 'xhisper' in unit.lower():
             result = call('systemctl', '--user', 'disable', '--now', unit, check=False)
@@ -103,7 +104,7 @@ def main():
             # A local unit cannot be masked in place; disabling plus stopping is
             # sufficient for login, with its previous unit listing saved below.
             disabled.append(unit)
-    (backup/'systemd-units.txt').write_text(units.stdout)
+    (backup/'systemd-units.txt').write_text(unit_listing)
     autostart = config_home/'autostart'
     if autostart.exists():
         for path in autostart.glob('*.desktop'):
@@ -152,11 +153,55 @@ def main():
     (backup/'migration.json').write_text(json.dumps({'disabled_units': disabled, 'stopped_pids': killed, 'shortcut': shortcut, 'new_command': command}, indent=2))
     print(f'Installed STT Anywhere at {ROOT}; shortcut {cfg.get("shortcut", "<Alt>x")}')
     print(f'Private backups and migration report: {backup}')
-    print('Credential: '+('present' if key or 'GROQ_API_KEY=' in credentials.read_text() else 'missing; set credentials.env'))
+    print('Credential: '+('present (hidden)' if plan['credential_present'] else 'missing; set credentials.env before dictating'))
+
+def atomic_write(path, text):
+    import tempfile
+    fd, temp = tempfile.mkstemp(dir=path.parent, prefix='.setup-')
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temp, 0o600)
+        os.replace(temp, path)
+    finally:
+        Path(temp).unlink(missing_ok=True)
+
+
+def main():
+    os.umask(0o077)
+    args = setup.parser().parse_args()
+    plan = setup.plan(ROOT, args)
+    setup.preview(plan)
+    if plan['dry_run']:
+        print('Dry run complete. Nothing changed.')
+        return
+    if plan['deps'] and not shutil.which('apt-get'):
+        raise ValueError('--deps supports Debian/Ubuntu apt-get; install dependencies manually on other systems')
+    # Check conflicts before confirmation whenever dependencies are available.
+    if not plan['deps']:
+        preflight(plan)
+    if plan['interactive'] and setup.ask('Apply this plan? Type yes to continue', 'no').lower() != 'yes':
+        raise setup.Cancelled()
+    if plan['deps']:
+        subprocess.run(['sudo','apt-get','update'],check=True)
+        subprocess.run(['sudo','apt-get','install','-y',*setup.PACKAGES],check=True)
+    # Repeat the read-only check just before applying; never overwrite a changed binding.
+    listing, unit_listing = preflight(plan)
+    apply(plan, listing, unit_listing)
+    print('Ready. Run sttanywhere doctor for local diagnostics. No provider request was made.')
+
 
 if __name__ == '__main__':
     try:
         main()
+    except (setup.Cancelled, EOFError):
+        print('Setup cancelled. No installation changes applied.')
+        sys.exit(0)
+    except KeyboardInterrupt:
+        print('Setup interrupted. If apply had started, review the private backups before retrying.')
+        sys.exit(130)
     except Exception as exc:
         print(f'Install failed: {exc}', file=sys.stderr)
         sys.exit(1)
