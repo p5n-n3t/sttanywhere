@@ -1,0 +1,26 @@
+{
+  "description": "Linux voice dictation with Groq Whisper and pluggable STT APIs. Alt+X recording, AT-SPI background insertion in supported editors, and safe clipboard fallback.",
+  "homepage": "https://github.com/p5n-n3t/sttanywhere#readme",
+  "topics": [
+    "linux",
+    "x11",
+    "xfce",
+    "xubuntu",
+    "dictation",
+    "speech-to-text",
+    "voice-to-text",
+    "voice-dictation",
+    "whisper",
+    "groq",
+    "transcription",
+    "at-spi",
+    "accessibility",
+    "clipboard",
+    "keyboard-shortcuts",
+    "python",
+    "bash",
+    "openai-compatible",
+    "developer-tools",
+    "productivity"
+  ]
+}

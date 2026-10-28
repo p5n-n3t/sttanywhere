@@ -1,0 +1,17 @@
+name: Feature request
+description: Propose a provider, compatibility improvement, platform adapter, or setup feature.
+labels: [enhancement, 'status: triage']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Workflow or problem
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior and how to verify it
+      description: For provider requests, link official API documentation; never supply credentials here.
+    validations:
+      required: true

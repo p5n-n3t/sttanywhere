@@ -1,3 +1,9 @@
+---
+title: STT Anywhere verification record
+description: Observed unit, desktop, credential migration and live Groq verification with explicit compatibility limits.
+keywords: [dictation testing, AT-SPI Mousepad, Groq Whisper verification, Linux X11]
+---
+
 # Verification — 2026-10-28
 
 Tested locally on JQ's Xubuntu X11 machine. This records observed checks, not a claim of universal application or provider compatibility.

@@ -1,10 +1,27 @@
 # STT Anywhere
 
+[![Checks](https://github.com/p5n-n3t/sttanywhere/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/p5n-n3t/sttanywhere/actions/workflows/check.yml) [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![Linux X11](https://img.shields.io/badge/platform-Linux%20X11-333333.svg?style=flat-square&logo=linux)](#platform-support) [![Python and Bash](https://img.shields.io/badge/runtime-Python%20%2B%20Bash-3776AB.svg?style=flat-square&logo=python)](lib/sttanywhere.py) [![Groq Whisper](https://img.shields.io/badge/default-Groq%20Whisper-F55036.svg?style=flat-square)](config/config.example.json) [![AT-SPI anchored insertion](https://img.shields.io/badge/insertion-AT--SPI-20A99A.svg?style=flat-square)](lib/accessibility.py) [![Open issues](https://img.shields.io/github/issues/p5n-n3t/sttanywhere.svg?style=flat-square)](https://github.com/p5n-n3t/sttanywhere/issues) [![Early development](https://img.shields.io/badge/status-early%20development-orange.svg?style=flat-square)](docs/ROADMAP.md)
+
 <p align="center"><img src="assets/logo.svg" alt="STT Anywhere microphone and cursor logo" width="144"></p>
 
-Local, keyboard-driven speech dictation for Xubuntu and other X11 desktops. Press **Alt+X** to start or stop recording; STT Anywhere transcribes the audio and, when the focused application exposes a supported editable text field through AT-SPI, replaces its recording marker with the transcript in that same field.
+**Linux voice dictation and speech-to-text with Groq Whisper, configurable providers, and an Alt+X global hotkey.** Built for Xubuntu/XFCE on X11. Press **Alt+X** to start or stop recording; STT Anywhere transcribes the audio and, when the focused application exposes a supported editable text field through AT-SPI, replaces its recording marker with the transcript in that same field.
 
 STT Anywhere uses a small Bash launcher and Python client. Audio capture and clipboard/X11 integration use Linux desktop utilities; anchored insertion uses the system Python with PyGObject and AT-SPI. Transcription is sent to a provider you configure. The project does not bundle a speech model or make provider calls until you record or transcribe a file.
+
+[Quick start](#install) · [Provider configuration](config/config.example.json) · [Tested behavior](docs/VERIFICATION.md) · [Alternatives](docs/ALTERNATIVES.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
+
+## Platform support
+
+| Platform or delivery path | Current status |
+| --- | --- |
+| Xubuntu / XFCE / X11 | Implemented; local microphone, shortcut and insertion checks recorded in verification |
+| Other Linux X11 desktops | Desktop integration needs verification; supplied shortcut installer is XFCE-specific |
+| Background insertion in Mousepad | Tested with a moved caret and another window in front |
+| Arbitrary browser tabs and terminal prompts | Not guaranteed; unsupported targets use clipboard recovery |
+| Linux Wayland | No supported desktop backend yet |
+| macOS and Windows | Planned assessment only; no native builds or installers yet |
+
+STT Anywhere is open source under the MIT license. Provider API usage may have separate charges. It is an API client, not an offline speech-recognition engine; only the configured provider receives submitted microphone audio.
 
 ## What it does
 
@@ -173,3 +190,16 @@ To change the hotkey, edit `shortcut` (for example `<Super>d`) and rerun `./inst
 Installation saves private backups under `~/.config/sttanywhere/backups/<timestamp>/`. The first full migration's `shortcuts.json` records xhisper's old live shortcuts; `systemd-units.txt` and `migration.json` record service state and migration actions. Later reinstall backups may record STT Anywhere instead, so choose the original migration backup.
 
 Use Xfce **Settings → Keyboard → Application Shortcuts** to remove the STT Anywhere command and restore the old command from `shortcuts.json` (on this machine, `/usr/local/bin/xhisper` on Alt+X). Restore any backed-up autostart `.desktop` files, and re-enable only the xhisper units listed as disabled in the original `migration.json` if they were enabled previously. STT Anywhere does not delete the old xhisper binary or its credential source. Remove the `~/.local/bin/sttanywhere` symlink if uninstalling. Save any recovery transcripts you want before deleting its private config and `/tmp` state.
+
+## How STT Anywhere compares
+
+Hotkey voice typing, Whisper dictation and bring-your-own-key transcription already exist in other projects. STT Anywhere focuses on a small, inspectable Linux client, provider profiles, and anchored insertion in supported accessible editors with clipboard recovery. See the [sourced alternatives review](docs/ALTERNATIVES.md); no “only one of its kind” claim is made.
+
+## Documentation and project discovery
+
+- [Documentation index](docs/README.md)
+- [Keyword, topic and dashboard guide](docs/DISCOVERABILITY.md)
+- [Interactive setup and native platform roadmap](docs/ROADMAP.md)
+- [Bug reports and feature requests](https://github.com/p5n-n3t/sttanywhere/issues/new/choose)
+
+Related searches: Linux voice dictation, Xubuntu voice typing, XFCE speech-to-text, Groq Whisper hotkey, AT-SPI background insertion, OpenAI-compatible transcription, and xhisper migration. Terminal and browser workflows remain subject to the capability limits above.

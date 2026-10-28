@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a recording, transcription, shortcut, or insertion problem.
+labels: [bug, 'status: triage']
+body:
+  - type: markdown
+    attributes:
+      value: Do not include API keys, credentials.env contents, private transcripts, or sensitive window titles.
+  - type: input
+    id: environment
+    attributes:
+      label: Linux distribution, desktop, and display server
+      placeholder: Xubuntu, XFCE, X11
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps, expected behavior, and actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Recording, Provider request, Anchored insertion, Clipboard or paste, Shortcut or installation, Other]
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include relevant doctor/context/status output, application name, and delivery mode. Redact private titles and paths.
