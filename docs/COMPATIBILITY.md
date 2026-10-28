@@ -10,6 +10,10 @@ STT Anywhere has several ways to deliver text. The exact path depends on whether
 
 ## Delivery paths
 
+**Browser address bars after switching windows remain unsupported for silent background insertion.** Recent Chrome and Firefox recordings completed transcription but used clipboard recovery after focus changed. A real isolated Chrome test also confirmed that `xdotool key --window ... ctrl+v` leaves the address bar unchanged while another window retains focus. Enabling desktop accessibility and Chrome renderer accessibility exposed readable text but no AT-SPI EditableText interface for the Chrome address bar. These mechanisms do not provide a universal background editor. A browser extension could support page text fields using saved DOM ranges, but ordinary extensions cannot edit the browser's address bar. That would require a separate integration.
+
+When automatic insertion is requested but cannot complete, STT Anywhere always sends a clipboard recovery notification, including when `notify_completion` is false. This setting suppresses routine success notifications only; explicit clipboard-only mode still respects it.
+
 ### AT-SPI anchored insertion
 
 At recording start, STT Anywhere asks `/usr/bin/python3` and AT-SPI for the focused, editable, non-password text object in the active application process. It inserts a recording marker at the current caret or replaces one selected range with the marker. It saves the application process ID and start token, accessible object path, and marker. At completion it searches that same object and replaces the marker only if it is still unique and unchanged.

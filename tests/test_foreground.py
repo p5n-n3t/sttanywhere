@@ -254,6 +254,24 @@ class ForegroundDeliveryTests(unittest.TestCase):
         accessible.assert_not_called()
         xdo.assert_not_called()
 
+    def test_failed_insertion_notifies_even_when_success_notifications_disabled(self):
+        state = {"status": "transcribing", "config": {"auto_paste": True, "notify_completion": False},
+                 "profile": {}, "window": "window-1", "input_guard": self.guard}
+        job, runtime_dir = self._make_worker_job(state)
+        with mock.patch.object(stt, "runtime", return_value=runtime_dir), \
+             mock.patch.object(stt, "transcribe", return_value="saved result"), \
+             mock.patch.object(stt.subprocess, "run"), \
+             mock.patch.object(stt, "foreground_deliver", return_value=(False, "Focus changed")), \
+             mock.patch.object(stt, "stop_input_guard"), \
+             mock.patch.object(stt, "xdo") as xdo, \
+             mock.patch.object(stt, "notify") as notify:
+            stt.worker(job)
+        notify.assert_called_once()
+        self.assertIn("Text copied to clipboard", notify.call_args.args[0])
+        self.assertEqual((job / "transcript.txt").read_text(), "saved result")
+        self.assertEqual(json.loads((job / "state.json").read_text())["status"], "clipboard")
+        xdo.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

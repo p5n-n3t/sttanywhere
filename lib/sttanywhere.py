@@ -340,7 +340,11 @@ def worker(job):
                     state.pop('delivery_reason',None)
                 else:
                     state['delivery_reason']=reason
-        if cfg.get('notify_completion', False):
+        if state['status'] == 'clipboard' and cfg.get('auto_paste', True):
+            # A requested insertion that could not happen needs feedback even
+            # when routine success notifications are disabled.
+            notify('Transcribed, but automatic insertion was unavailable or focus changed. Text copied to clipboard; use your paste shortcut or sttanywhere paste.')
+        elif cfg.get('notify_completion', False):
             notify('Transcription inserted in the original text field.' if state['status'] == 'done' else 'Transcription ready on clipboard; use your paste shortcut or sttanywhere paste.')
         # Successful audio is deleted; transcript retained privately for recovery.
         (job/'audio.wav').unlink(missing_ok=True)
