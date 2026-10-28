@@ -30,6 +30,8 @@ def main():
     processes = []
     module = None
     env = os.environ.copy()
+    # Isolated D-Bus sessions must not mount FUSE paths in the real home.
+    env["GVFS_DISABLE_FUSE"] = "1"
     env['XDG_RUNTIME_DIR'] = f'/run/user/{os.getuid()}'
     env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path=/run/user/{os.getuid()}/bus'
     base = Path(tempfile.mkdtemp(prefix='sttanywhere-integration-'))

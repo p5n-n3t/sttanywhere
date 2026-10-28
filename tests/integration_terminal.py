@@ -13,6 +13,8 @@ from integration_x11 import wait_for, ROOT
 def main():
     procs = []
     env = os.environ.copy()
+    # Isolated D-Bus sessions must not mount FUSE paths in the real home.
+    env["GVFS_DISABLE_FUSE"] = "1"
     with tempfile.TemporaryDirectory(prefix='sttanywhere-terminal-') as folder:
         base = Path(folder)
         try:

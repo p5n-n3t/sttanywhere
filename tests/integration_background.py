@@ -106,6 +106,8 @@ def session():
                 except subprocess.TimeoutExpired:proc.kill()
 
 if __name__=='__main__':
+    # gvfsd inherits this in the private session; never create a host ~/.gvfs mount.
+    os.environ['GVFS_DISABLE_FUSE']='1'
     if '--session' in sys.argv:
         session()
     else:
