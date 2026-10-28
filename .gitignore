@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+credentials.env
+config.local.json
+*.wav
+*.flac
+*.log
+.coverage

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# STT Anywhere: use ./install.sh to back up, stop/disable xhisper and replace
+# its XFCE shortcut BEFORE enabling this entrypoint. Never run both bindings.
+# ./install.sh sends SIGTERM then SIGKILL to remaining xhisper executables
+# and xhisper recorders, runs systemctl --user disable --now for xhisper units,
+# disables xhisper autostart files, and removes its XFCE shortcut properties.
+# Existing configuration/credentials are backed up privately rather than deleted.
+set -euo pipefail
+SCRIPT="$(readlink -f -- "${BASH_SOURCE[0]}")"
+ROOT="$(cd -- "$(dirname -- "$SCRIPT")/.." && pwd)"
+# Native shortcut processes do not inherit interactive shell exports.
+ENV_FILE="${STTANYWHERE_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/sttanywhere/credentials.env}"
+if [[ -f "$ENV_FILE" ]]; then
+  # Installer writes only shell-quoted assignments; preserve explicit overrides.
+  inherited_groq="${GROQ_API_KEY-}"
+  set -a
+  source "$ENV_FILE"
+  set +a
+  [[ -z "$inherited_groq" ]] || export GROQ_API_KEY="$inherited_groq"
+fi
+exec python3 "$ROOT/lib/sttanywhere.py" "$@"

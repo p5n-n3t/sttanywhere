@@ -1,0 +1,57 @@
+{
+  "provider": "groq",
+  "shortcut": "<Alt>x",
+  "audio_source": "default",
+  "max_recording_seconds": 600,
+  "max_audio_bytes": 25000000,
+  "request_timeout": 90,
+  "job_timeout": 300,
+  "terminal_pattern": "warp|terminal|kitty|xterm|alacritty|wezterm|konsole|tilix|urxvt|st$",
+  "paste_mode": "auto",
+  "auto_paste": true,
+  "placeholder_padding": " ",
+  "providers": {
+    "groq": {
+      "adapter": "openai",
+      "endpoint": "https://api.groq.com/openai/v1/audio/transcriptions",
+      "model": "whisper-large-v3-turbo",
+      "api_key_env": "GROQ_API_KEY",
+      "response_path": "text",
+      "options": {
+        "response_format": "json"
+      }
+    },
+    "openai": {
+      "adapter": "openai",
+      "endpoint": "https://api.openai.com/v1/audio/transcriptions",
+      "model": "whisper-1",
+      "api_key_env": "OPENAI_API_KEY",
+      "response_path": "text",
+      "options": {
+        "response_format": "json"
+      }
+    },
+    "assemblyai": {
+      "adapter": "assemblyai",
+      "endpoint": "https://api.assemblyai.com/v2",
+      "model": "universal-3-5-pro",
+      "api_key_env": "ASSEMBLYAI_API_KEY",
+      "options": {}
+    },
+    "cloudflare": {
+      "adapter": "json_base64",
+      "endpoint": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}",
+      "model": "@cf/openai/whisper-large-v3-turbo",
+      "api_key_env": "CLOUDFLARE_API_TOKEN",
+      "response_path": "result.text"
+    },
+    "custom": {
+      "adapter": "openai",
+      "endpoint": "https://YOUR-PROVIDER.example/v1/audio/transcriptions",
+      "model": "YOUR-MODEL",
+      "api_key_env": "CUSTOM_STT_API_KEY",
+      "response_path": "text",
+      "options": {}
+    }
+  }
+}

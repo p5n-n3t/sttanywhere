@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">STT Anywhere</title>
+  <desc id="desc">A teal microphone with a coral cursor pointer and sound waves.</desc>
+  <defs>
+    <linearGradient id="mic" x1="76" y1="38" x2="166" y2="172" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#68E0D1"/>
+      <stop offset="1" stop-color="#20A99A"/>
+    </linearGradient>
+    <filter id="shadow" x="34" y="24" width="196" height="214" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#071923" flood-opacity=".28"/>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="58" fill="#10232E"/>
+  <g filter="url(#shadow)">
+    <rect x="91" y="42" width="74" height="116" rx="37" fill="url(#mic)"/>
+    <path d="M72 119v8a56 56 0 0 0 112 0v-8" fill="none" stroke="#EAF7F5" stroke-linecap="round" stroke-width="12"/>
+    <path d="M128 183v24m-30 0h60" fill="none" stroke="#EAF7F5" stroke-linecap="round" stroke-width="12"/>
+    <path d="M110 78h36m-36 22h36m-36 22h30" stroke="#10232E" stroke-linecap="round" stroke-opacity=".35" stroke-width="6"/>
+  </g>
+  <path d="m163 139 42 35-20 3 10 25-12 5-10-25-12 16-4-59Z" fill="#FF806E" stroke="#10232E" stroke-linejoin="round" stroke-width="7"/>
+  <path d="M51 75c-7 12-11 26-11 41m175-41c7 12 11 26 11 41" fill="none" stroke="#68E0D1" stroke-linecap="round" stroke-opacity=".7" stroke-width="7"/>
+</svg>
