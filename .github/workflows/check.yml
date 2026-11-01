@@ -23,5 +23,10 @@ jobs:
           bash -n install.sh
       - name: Run unit tests
         run: python3 -m unittest discover -s tests
+      - name: Check browser companion
+        run: |
+          node --check browser/background.js
+          node --check browser/content.js
+          node --test browser/tests/*.test.js
       - name: Verify guided installer in a real terminal
         run: python3 tests/integration_installer.py

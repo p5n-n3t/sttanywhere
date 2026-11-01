@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Chrome native messaging host and private local bridge server."""
+import json
+import os
+from pathlib import Path
+import select
+import socket
+import stat
+import struct
+import sys
+import threading
+import uuid
+
+MAX_MESSAGE = 1_048_576
+SOCKET_TIMEOUT = 10.0
+NATIVE_HOST = "org.sttanywhere.bridge"
+uid = os.getuid()
+runtime = Path(os.environ.get("STTANYWHERE_BROWSER_RUNTIME_DIR", f"/tmp/sttanywhere-{uid}"))
+sock_path = runtime / "browser.sock"
+pending = {}
+pending_lock = threading.Lock()
+request_lock = threading.Lock()
+stdout_lock = threading.Lock()
+listener = None
+
+
+def read_exact(fd, size):
+    chunks = bytearray()
+    while len(chunks) < size:
+        part = os.read(fd, size - len(chunks))
+        if not part:
+            return None
+        chunks.extend(part)
+    return bytes(chunks)
+
+
+def read_frame(fd):
+    head = read_exact(fd, 4)
+    if head is None:
+        return None
+    size = struct.unpack("<I", head)[0]
+    if not size or size > MAX_MESSAGE:
+        raise ValueError("Invalid native message size")
+    body = read_exact(fd, size)
+    if body is None:
+        raise ValueError("Truncated native message")
+    return json.loads(body.decode("utf-8"))
+
+
+def send_frame(message):
+    body = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(body) > MAX_MESSAGE:
+        raise ValueError("Native response too large")
+    packet = memoryview(struct.pack("<I", len(body)) + body)
+    with stdout_lock:
+        while packet:
+            packet = packet[os.write(1, packet):]
+
+
+def recv_exact(conn, size):
+    data = bytearray()
+    while len(data) < size:
+        chunk = conn.recv(size - len(data))
+        if not chunk:
+            return None
+        data.extend(chunk)
+    return bytes(data)
+
+
+def secure_runtime():
+    if not runtime.is_absolute():
+        raise RuntimeError("Browser bridge runtime path must be absolute")
+    for component in (Path("/"), *reversed(runtime.parents)):
+        if stat.S_ISLNK(component.lstat().st_mode):
+            raise RuntimeError("Symlink in browser bridge runtime path")
+    try:
+        info = runtime.lstat()
+    except FileNotFoundError:
+        runtime.mkdir(mode=0o700)
+        info = runtime.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid:
+        raise RuntimeError("Unsafe browser bridge runtime directory")
+    os.chmod(runtime, 0o700)
+    try:
+        info = sock_path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != uid:
+        raise RuntimeError("Refusing to replace unsafe browser bridge socket")
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(0.2)
+    try:
+        probe.connect(str(sock_path))
+    except ConnectionRefusedError:
+        pass
+    except OSError as exc:
+        raise RuntimeError("Cannot verify existing browser bridge socket") from exc
+    else:
+        raise RuntimeError("Browser bridge is already running")
+    finally:
+        probe.close()
+    sock_path.unlink()
+
+
+def bridge_request(conn):
+    try:
+        conn.settimeout(SOCKET_TIMEOUT)
+        head = recv_exact(conn, 4)
+        if head is None:
+            return
+        size = struct.unpack("<I", head)[0]
+        if not 0 < size <= MAX_MESSAGE:
+            return
+        body = recv_exact(conn, size)
+        if body is None:
+            return
+        request = json.loads(body.decode("utf-8"))
+        if not isinstance(request, dict) or request.get("op") not in ("capture", "replace") or not isinstance(request.get("id"), str):
+            return
+        # One serialized extension command at a time; no duplicated retries.
+        with request_lock:
+            event, slot = threading.Event(), {}
+            request_id = request["id"]
+            with pending_lock:
+                if request_id in pending:
+                    raise ValueError("Duplicate request id")
+                pending[request_id] = (event, slot)
+            native = {"id": request_id, "op": request["op"]}
+            for key in ("marker", "anchor", "replacement"):
+                if key in request:
+                    native[key] = request[key]
+            send_frame(native)
+            if not event.wait(SOCKET_TIMEOUT):
+                with pending_lock:
+                    pending.pop(request_id, None)
+                reply = {"id": request_id, "error": "Browser request timed out; outcome may be unknown"}
+            else:
+                with pending_lock:
+                    pending.pop(request_id, None)
+                reply = slot.get("reply", {"id": request_id, "error": "Invalid browser response"})
+        raw = json.dumps(reply, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(raw) <= MAX_MESSAGE:
+            conn.sendall(struct.pack("<I", len(raw)) + raw)
+    except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    finally:
+        conn.close()
+
+
+def run():
+    global listener
+    secure_runtime()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(sock_path))
+    os.chmod(sock_path, 0o600)
+    listener.listen(8)
+    listener.setblocking(False)
+    while True:
+        ready, _, _ = select.select([0, listener], [], [])
+        if listener in ready:
+            conn, _ = listener.accept()
+            threading.Thread(target=bridge_request, args=(conn,), daemon=True).start()
+        if 0 in ready:
+            message = read_frame(0)
+            if message is None:
+                return
+            if isinstance(message, dict) and isinstance(message.get("id"), str):
+                with pending_lock:
+                    pair = pending.get(message["id"])
+                if pair:
+                    event, slot = pair
+                    slot["reply"] = message
+                    event.set()
+
+
+if __name__ == "__main__":
+    try:
+        run()
+    except Exception as exc:
+        print(f"{NATIVE_HOST}: {exc}", file=sys.stderr)
+        raise SystemExit(1)

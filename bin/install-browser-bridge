@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Register the STT Anywhere native messaging host for Chrome/Chromium."""
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+HOST = ROOT / "bin/sttanywhere-browser-host"
+EXTENSION = ROOT / "browser"
+HOST_NAME = "org.sttanywhere.bridge"
+
+
+def extension_id(manifest):
+    key = manifest.get("key")
+    if not isinstance(key, str):
+        raise ValueError("browser/manifest.json must contain the public extension key")
+    public_key = base64.b64decode(key, validate=True)
+    digest = hashlib.sha256(public_key).digest()[:16]
+    return "".join(chr(ord("a") + nibble) for byte in digest for nibble in (byte >> 4, byte & 15))
+
+
+def write_private(path, data):
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.parent.is_symlink() or not path.parent.is_dir():
+        raise ValueError(f"Unsafe native host directory: {path.parent}")
+    os.chmod(path.parent, 0o700)
+    if path.exists() and (path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid()):
+        raise ValueError(f"Refusing to replace unrelated native host manifest: {path}")
+    temp = path.with_name(path.name + f".tmp-{os.getpid()}")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def main():
+    if not HOST.is_file():
+        raise ValueError(f"Native host is missing: {HOST}")
+    os.chmod(HOST, 0o755)
+    manifest = json.loads((EXTENSION / "manifest.json").read_text(encoding="utf-8"))
+    ext_id = extension_id(manifest)
+    origins = [f"chrome-extension://{ext_id}/"]
+    config_override = os.environ.get("STTANYWHERE_BROWSER_CONFIG_ROOT")
+    if config_override:
+        bases = [Path(config_override).expanduser() / "google-chrome", Path(config_override).expanduser() / "chromium"]
+    else:
+        config_home = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))).expanduser()
+        bases = [config_home / "google-chrome", config_home / "chromium"]
+    registration = {"name": HOST_NAME, "description": "STT Anywhere page-field bridge", "path": str(HOST), "type": "stdio", "allowed_origins": origins}
+    installed = []
+    for base in bases:
+        target = base / "NativeMessagingHosts" / (HOST_NAME + ".json")
+        write_private(target, registration)
+        installed.append(target)
+    print(f"Registered {HOST_NAME} for extension {ext_id}:")
+    for path in installed:
+        print(path)
+    print("Restart the browser to load the native messaging host registration.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"install-browser-bridge: {exc}", file=sys.stderr)
+        raise SystemExit(1)

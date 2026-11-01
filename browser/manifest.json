@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "STT Anywhere Companion",
+  "version": "1.0.0",
+  "description": "Safely place transcription results into the field where recording began.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAudkZTRHpZEg8TRstA1QoiAgxTYw+Zu0gLllCvmE1YPNnA/VQqV4wnC3pyXuER6Bz4doztfW+uZQ1/v0323WxxXDXJKmmqk67F6xx1jh2Qv3SNQdkhvSdj1kXGKB4RsvZzAVawyC72IIzBdCvkJXXVN9uwJG4Py6lBPx/UgL49wRcqKNsoXlwTWaMs3QnQrfGYW4WWhFVc/rUE0rmyBMHSQtZ1/t95ukoY94gvQkVSZJjgwIFxqGo+unv3YK8YMjqhCNaWv5pXKpmRlRgL/vLBnch57nN6ERb9n9uhwzEYG0326SbY7+foUAn8DWf6F66QbL3bxtAPX4kzVkDLjmM6QIDAQAB",
+  "permissions": ["nativeMessaging", "tabs", "webNavigation"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["content.js"],
+    "run_at": "document_idle",
+    "all_frames": true
+  }]
+}

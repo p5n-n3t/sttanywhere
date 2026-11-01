@@ -23,10 +23,12 @@ try:
     from .paste_context import foreground_process, paste_chord
     from .input_guard import focus_id
     from .transport import NoRedirect, request_json, ProviderTransportError
+    from . import browser_bridge
 except ImportError:
     from paste_context import foreground_process, paste_chord
     from input_guard import focus_id
     from transport import NoRedirect, request_json, ProviderTransportError
+    import browser_bridge
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = Path(os.environ.get('STTANYWHERE_CONFIG', Path(os.environ.get('XDG_CONFIG_HOME', Path.home()/'.config'))/'sttanywhere/config.json'))
@@ -138,6 +140,17 @@ def replace_placeholder(window, count, replacement):
 
 
 def accessible(command, data):
+    # Browser anchors belong to the extension's document model. Sending them
+    # through AT-SPI can target a different field in the same browser process.
+    anchor = data if isinstance(data, dict) else None
+    if command == 'replace' and isinstance(anchor, dict) and anchor.get('backend') == 'browser':
+        browser_anchor = anchor['browser_anchor']
+        native_anchor = browser_anchor.get('anchor', browser_anchor)
+        updated = browser_bridge.request('replace', anchor=native_anchor,
+                                         replacement=data['replacement'])
+        if isinstance(updated, dict) and isinstance(updated.get('anchor'), dict):
+            browser_anchor = {**browser_anchor, 'anchor': updated['anchor']}
+        return {**anchor, 'browser_anchor': browser_anchor, 'marker': data['replacement']}
     result = subprocess.run(['/usr/bin/python3', str(ROOT/'lib/accessibility.py'), command],
                             input=json.dumps(data), text=True, capture_output=True, timeout=12)
     try:
@@ -159,6 +172,31 @@ def target_context():
         pid = None
     return dict(window=window, window_class=window_class, window_name=window_name,
                 window_pid=pid, foreground_process=foreground_process(pid))
+
+
+def is_chrome_or_chromium(context):
+    """Match only Chrome/Chromium window classes, not other Chromium browsers."""
+    return bool(re.search(r'(?:^|["\s])(?:google-chrome(?:-stable)?|chromium(?:-browser)?|chrome)(?:["\s]|$)',
+                          context.get('window_class', ''), re.I))
+
+
+def capture_browser(context, marker):
+    """Capture in the active Chrome/Chromium document before trying AT-SPI."""
+    browser_anchor = browser_bridge.request('capture', marker=marker,
+                                            pid=context.get('window_pid'),
+                                            window=context.get('window'))
+    return {'backend': 'browser', 'browser_anchor': browser_anchor, 'marker': marker}
+
+
+def capture_anchor(context, marker):
+    """Prefer browser capture where supported; avoid retries after ambiguous outcomes."""
+    if is_chrome_or_chromium(context):
+        try:
+            return capture_browser(context, marker)
+        except Exception as error:
+            if not getattr(error, 'safe_to_fallback', False):
+                raise
+    return accessible('capture', {'pid': context.get('window_pid'), 'marker': marker})
 
 
 def endpoint(profile):
@@ -406,7 +444,8 @@ def toggle(cfg, profile):
                 if cfg.get('auto_paste',True) and cfg.get('foreground_fallback',True):
                     state['input_guard']=start_input_guard(job,cfg)
                 try:
-                    state['anchor'] = accessible('capture', {'pid': context['window_pid'], 'marker': RECORDING+' '})
+                    marker = RECORDING+' '
+                    state['anchor'] = capture_anchor(context, marker)
                     stop_input_guard(state.pop('input_guard',None))
                 except Exception as error:
                     state['anchor_error'] = str(error)
