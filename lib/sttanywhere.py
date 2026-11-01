@@ -24,11 +24,13 @@ try:
     from .input_guard import focus_id
     from .transport import NoRedirect, request_json, ProviderTransportError
     from . import browser_bridge
+    from . import terminal_bridge
 except ImportError:
     from paste_context import foreground_process, paste_chord
     from input_guard import focus_id
     from transport import NoRedirect, request_json, ProviderTransportError
     import browser_bridge
+    import terminal_bridge
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = Path(os.environ.get('STTANYWHERE_CONFIG', Path(os.environ.get('XDG_CONFIG_HOME', Path.home()/'.config'))/'sttanywhere/config.json'))
@@ -143,6 +145,11 @@ def accessible(command, data):
     # Browser anchors belong to the extension's document model. Sending them
     # through AT-SPI can target a different field in the same browser process.
     anchor = data if isinstance(data, dict) else None
+    if command == 'replace' and isinstance(anchor, dict) and anchor.get('backend') == 'terminal':
+        updated = terminal_bridge.replace(anchor, data['replacement'])
+        if isinstance(updated, dict):
+            return updated
+        return {**anchor, 'marker': data['replacement']}
     if command == 'replace' and isinstance(anchor, dict) and anchor.get('backend') == 'browser':
         browser_anchor = anchor['browser_anchor']
         native_anchor = browser_anchor.get('anchor', browser_anchor)
@@ -190,6 +197,10 @@ def capture_browser(context, marker):
 
 def capture_anchor(context, marker):
     """Prefer browser capture where supported; avoid retries after ambiguous outcomes."""
+    if re.search(r'warp|terminal|kitty|xterm', context.get('window_class', ''), re.I):
+        terminal_anchor = terminal_bridge.capture(context, marker)
+        if terminal_anchor:
+            return terminal_anchor
     if is_chrome_or_chromium(context):
         try:
             return capture_browser(context, marker)
